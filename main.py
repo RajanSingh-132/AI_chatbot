@@ -4,15 +4,21 @@ from app.routes.chat_routes import router as chat_router
 from app.mongo_client import MongoDBClient
 from app.utils.request_tracker import tracker
 from dotenv import load_dotenv
+
+# ==========================
+# Load Environment Variables
+# ==========================
 load_dotenv()
 
+# ==========================
+# FastAPI App
+# ==========================
 app = FastAPI(title="AI Chatbot with MongoDB")
 
 # ==========================
 # MongoDB Instance
 # ==========================
 mongo = MongoDBClient()
-
 
 # ==========================
 # Startup Event
@@ -22,7 +28,6 @@ def startup_db():
     mongo.connect_with_retry()
     app.state.mongo = mongo
 
-
 # ==========================
 # Shutdown Event
 # ==========================
@@ -30,30 +35,26 @@ def startup_db():
 def shutdown_db():
     mongo.close()
 
-
 # ==========================
 # CORS Middleware
+# Allow all origins
 # ==========================
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # ==========================
 # Routes
 # ==========================
 app.include_router(chat_router)
 
-
+# ==========================
+# Health Check / Root Route
+# ==========================
 @app.get("/")
 def home():
     return {"message": "AI Chatbot Running 🚀"}
