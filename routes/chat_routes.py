@@ -1,8 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from prompt import format_response
 from services.ai_services import generate_ai_response
 from utils.request_tracker import tracker
-from services.conversationsSaver import save_chat, get_chat_history   # ⭐ use your file
+from services.conversationsSaver import save_chat, get_chat_history
 
 router = APIRouter()
 
@@ -11,19 +11,23 @@ tracker.api_hit()
 @router.post("/chat")
 async def chat(data: dict):
 
+    print("Request received")
+
     user_message = data.get("message")
-    user_id = "user1"   # later take from auth / frontend
+    user_id = "user1"
 
-    if not user_message:
-        return {"response": "Message is required"}
+    print("Message:", user_message)
 
-    # ⭐ load history from DB instead of memory list
     history = get_chat_history(user_id)
 
-    ai_text = generate_ai_response(user_id, user_message, history)
-    ai_text = format_response(ai_text)
+    print("History loaded")
 
-    # ⭐ SAVE CHAT
+    ai_text = generate_ai_response(user_id, user_message, history)
+
+    print("AI generated")
+
     save_chat(user_id, user_message, ai_text)
+
+    print("Saved to DB")
 
     return {"response": ai_text}

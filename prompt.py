@@ -95,6 +95,7 @@ Never mix refusal with normal explanation.
 def format_response(text: str) -> str:
     """
     Clean formatting while keeping HTML
+    Ensures only single line breaks between paragraphs
     """
 
     if not text:
@@ -102,8 +103,11 @@ def format_response(text: str) -> str:
 
     text = text.strip()
 
-    while "\n" in text:
-        text = text.replace("\n", "\n")
+    # Remove multiple empty lines
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+
+    # Join with single line break
+    text = "\n".join(lines)
 
     return text
 
