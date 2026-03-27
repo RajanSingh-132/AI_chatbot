@@ -272,24 +272,6 @@ IMPORTANT:
 - ADD JSON output alongside it
 - DO NOT remove or replace current logic
 
---------------------------------------
-
-FINAL OUTPUT MUST BE VALID JSON:
-
-{
-  "answer": "<HTML formatted explanation>",
-  "kpis": [
-    { "title": "metric name", "value": number }
-  ],
-  "charts": [
-    {
-      "type": "bar | pie | line",
-      "data": [
-        { "label": "category", "value": number }
-      ]
-    }
-  ]
-}
 
 --------------------------------------
 

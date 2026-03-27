@@ -23,7 +23,7 @@ retriever = RAGRetriever()
 
 
 # ----------------------------
-# FETCH DATA
+# ✅ FETCH DATA (MISSING FIX)
 # ----------------------------
 def fetch_data(dataset):
 
@@ -48,34 +48,42 @@ def generate_ai_response(user_id: str, message: str, history=None) -> dict:
 
     query = message.lower().strip()
     dataset = ACTIVE_DATASET
+    result = None
 
     print("ACTIVE DATASET:", dataset)
 
     # ----------------------------
     # CACHE CHECK
     # ----------------------------
+    cached = None
     if dataset:
         cached = mongo_client.get_cached_result(dataset, query)
 
-        if cached:
-            print("✅ Returning cached result")
-            return {
-                "answer": cached["answer"],
-                "kpis": cached["kpis"],
-                "charts": cached["charts"]
-            }
+    if cached:
+        print("⚡ FLOW: CACHE")
 
-    # ----------------------------
-    # FETCH DATA
-    # ----------------------------
-    data = fetch_data(dataset)
-    print("DATA LENGTH:", len(data))
+        result = {
+            "answer": cached.get("answer", ""),
+            "kpis": cached.get("kpis", []),
+            "charts": cached.get("charts", [])
+        }
 
-    if dataset and data:
+    else:
+        # ----------------------------
+        # FETCH DATA
+        # ----------------------------
+        data = fetch_data(dataset)
+        print("DATA LENGTH:", len(data))
 
-        dataset_json = json.dumps(data[:50], indent=2)
+        # ----------------------------
+        # DATASET FLOW
+        # ----------------------------
+        if dataset and data:
+            print("🧠 FLOW: DATASET AI")
 
-        prompt = f"""
+            dataset_json = json.dumps(data[:50], indent=2)
+
+            prompt = f"""
 {SYSTEM_PROMPT}
 
 Dataset:
@@ -83,123 +91,158 @@ Dataset:
 
 User Query:
 {message}
+
+IMPORTANT:
+Return ONLY JSON:
+{{
+  "answer": "string",
+  "kpis": [],
+  "charts": []
+}}
 """
 
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt
+                )
 
-            raw_text = response.text if hasattr(response, "text") else str(response)
+                raw_text = response.text if hasattr(response, "text") else str(response)
 
-            # ----------------------------
-            # 🔥 CLEAN RAW TEXT
-            # ----------------------------
-            raw_text = raw_text.replace("```json", "")
-            raw_text = raw_text.replace("```", "")
-            raw_text = raw_text.replace("\\n", " ")
-            raw_text = raw_text.replace("\n", " ")
-            raw_text = raw_text.replace("Answer:", "")
-            raw_text = raw_text.strip()
+                # 🔹 Clean
+                raw_text = raw_text.replace("```json", "")
+                raw_text = raw_text.replace("```", "")
+                raw_text = raw_text.replace("\\n", " ")
+                raw_text = raw_text.replace("\n", " ")
+                raw_text = raw_text.replace("Answer:", "").strip()
 
-            print("RAW CLEANED:", raw_text)
+                # 🔹 Extract JSON
+                start = raw_text.find("{")
+                end = raw_text.rfind("}") + 1
 
-            # ----------------------------
-            # 🔥 EXTRACT FULL JSON
-            # ----------------------------
-            start = raw_text.find("{")
-            end = raw_text.rfind("}") + 1
+                if start != -1 and end != -1:
+                    try:
+                        parsed = json.loads(raw_text[start:end])
 
-            if start == -1 or end == -1:
-                print("❌ JSON not found")
-                return {
-                    "answer": "Invalid AI response format",
+                        answer = parsed.get("answer", "").strip()
+                        answer = re.sub(r"\s+", " ", answer)
+
+                        result = {
+                            "answer": answer,
+                            "kpis": parsed.get("kpis", []),
+                            "charts": parsed.get("charts", [])
+                        }
+
+                    except Exception as e:
+                        print("❌ JSON Parse Error:", e)
+                        result = {
+                            "answer": "Error parsing AI response",
+                            "kpis": [],
+                            "charts": []
+                        }
+                else:
+                    result = {
+                        "answer": "Invalid AI response format",
+                        "kpis": [],
+                        "charts": []
+                    }
+
+            except Exception as e:
+                print("❌ AI Error:", str(e))
+                result = {
+                    "answer": "AI service unavailable",
                     "kpis": [],
                     "charts": []
                 }
 
-            json_str = raw_text[start:end]
+        # ----------------------------
+        # FALLBACK (RAG)
+        # ----------------------------
+        else:
+            print("📚 FLOW: RAG FALLBACK")
+
+            docs = retriever.get_relevant_documents(message)
+            context = "\n\n".join(doc.page_content for doc in docs)
 
             try:
-                parsed = json.loads(json_str)
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=f"""
+{SYSTEM_PROMPT}
+
+Context:
+{context}
+
+User Query:
+{message}
+
+IMPORTANT:
+Return ONLY JSON with this structure:
+- answer: string
+- kpis: array
+- charts: array of objects with type and data
+"""
+                )
+
+                raw_text = response.text if hasattr(response, "text") else str(response)
+
+                # 🔹 Clean
+                raw_text = raw_text.replace("```json", "")
+                raw_text = raw_text.replace("```", "")
+                raw_text = raw_text.replace("\\n", " ")
+                raw_text = raw_text.replace("\n", " ")
+                raw_text = raw_text.replace("Answer:", "").strip()
+
+                # 🔹 Extract JSON
+                start = raw_text.find("{")
+                end = raw_text.rfind("}") + 1
+
+                if start != -1 and end != -1:
+                    try:
+                        parsed = json.loads(raw_text[start:end])
+
+                        answer = parsed.get("answer", "").strip()
+                        answer = re.sub(r"\s+", " ", answer)
+
+                        result = {
+                            "answer": answer,
+                            "kpis": parsed.get("kpis", []),
+                            "charts": parsed.get("charts", [])
+                        }
+
+                    except:
+                        result = {
+                            "answer": raw_text.strip(),
+                            "kpis": [],
+                            "charts": []
+                        }
+                else:
+                    result = {
+                        "answer": raw_text.strip(),
+                        "kpis": [],
+                        "charts": []
+                    }
+
             except Exception as e:
-                print("❌ JSON Parse Error:", e)
-                return {
-                    "answer": "Error parsing AI response",
+                print("❌ AI Error:", str(e))
+                result = {
+                    "answer": "AI service unavailable",
                     "kpis": [],
                     "charts": []
                 }
 
-            # ----------------------------
-            # 🔥 CLEAN FINAL OUTPUT
-            # ----------------------------
-            answer = parsed.get("answer", "").strip()
-
-            answer = answer.replace("\\n", " ")
-            answer = answer.replace("\n", " ")
-            answer = answer.replace("Answer:", "")
-            answer = re.sub(r"\s+", " ", answer).strip()
-
-            final_kpis = parsed.get("kpis", [])
-            final_charts = parsed.get("charts", [])
-
-            print("FINAL ANSWER:", answer)
-
-            # ----------------------------
-            # 🔥 SAVE RESULT
-            # ----------------------------
-            if answer:
-                print("🔥 SAVING TO DB:", query)
-
-                mongo_client.save_result({
-                    "file_name": dataset,
-                    "query": query,
-                    "answer": answer,
-                    "kpis": final_kpis,
-                    "charts": final_charts
-                })
-
-            return {
-                "answer": answer,
-                "kpis": final_kpis,
-                "charts": final_charts
-            }
-
-        except Exception as e:
-            print("❌ AI Error:", str(e))
-
-            return {
-                "answer": "AI service unavailable",
-                "kpis": [],
-                "charts": []
-            }
-
     # ----------------------------
-    # FALLBACK (RAG)
+    # 🔥 SINGLE SAVE POINT
     # ----------------------------
-    docs = retriever.get_relevant_documents(message)
-    context = "\n\n".join(doc.page_content for doc in docs)
+    if result and result.get("answer"):
+        print("🔥 SAVING FINAL RESULT:", query)
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"{SYSTEM_PROMPT}\n\n{context}\n\n{message}"
-        )
+        mongo_client.save_result({
+            "file_name": dataset or "rag_fallback",
+            "query": query,
+            "answer": result["answer"],
+            "kpis": result["kpis"],
+            "charts": result["charts"]
+        })
 
-        raw_text = response.text if hasattr(response, "text") else str(response)
-
-        return {
-            "answer": raw_text.strip(),
-            "kpis": [],
-            "charts": []
-        }
-
-    except Exception as e:
-        print("❌ AI Error:", str(e))
-
-        return {
-            "answer": "AI service unavailable",
-            "kpis": [],
-            "charts": []
-        }
+    return result
